@@ -1,60 +1,54 @@
 # ==============================================================================
-# Скрипт подготовки Windows к клонированию (Sysprep)
-# Назначение: Удаление уникальных идентификаторов (SID) и очистка системы перед созданием Gold Image
+# Windows Sysprep Script
+# Purpose: Clean system logs, temp files, reset network and run Sysprep
 # ==============================================================================
 
-# Проверка прав администратора
+# Check for Administrator privileges
 $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Error "Скрипт должен быть запущен от имени Администратора!"
+    Write-Error "Error: Run this script as Administrator!"
     exit
 }
 
-Write-Host "--- Начало подготовки Windows к клонированию ---" -ForegroundColor Green
+Write-Host "--- Windows Gold Image Preparation ---" -ForegroundColor Green
 
-# 1. Очистка журналов событий (Event Logs)
-# Удаление истории системных событий, приложений и безопасности для чистого старта клона
-Write-Host "[1/5] Очистка журналов событий Windows..." -ForegroundColor Cyan
+# 1. Clear Event Logs
+Write-Host "[1/5] Clearing Event Logs..." -ForegroundColor Cyan
 Get-EventLog -LogName * | ForEach-Object { 
-    try { Clear-EventLog $_.Log } catch { Write-Warning "Не удалось очистить лог: $($_.Log)" }
+    try { Clear-EventLog $_.Log } catch { Write-Warning "Skipped log: $($_.Log)" }
 }
 
-# 2. Очистка временных файлов и корзины
-# Удаление временных данных текущего пользователя, системных временных файлов и очистка корзины
-Write-Host "[2/5] Удаление временных файлов и очистка корзины..." -ForegroundColor Cyan
+# 2. Clear Temp & Recycle Bin
+Write-Host "[2/5] Cleaning Temp folders and Recycle Bin..." -ForegroundColor Cyan
 Remove-Item -Path "$env:TEMP\*" -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item -Path "$env:windir\Temp\*" -Recurse -Force -ErrorAction SilentlyContinue
 Clear-RecycleBin -Confirm:$false -ErrorAction SilentlyContinue
 
-# 3. Сброс сетевых настроек
-# Очистка кэша DNS и сброс стека TCP/IP для предотвращения конфликтов сетевых настроек
-Write-Host "[3/5] Сброс сетевого стека..." -ForegroundColor Cyan
+# 3. Reset Network
+Write-Host "[3/5] Resetting Network Stack (TCP/IP, DNS)..." -ForegroundColor Cyan
 netsh winsock reset | Out-Null
 netsh int ip reset | Out-Null
 ipconfig /flushdns | Out-Null
 
-# 4. Очистка истории PowerShell
-# Удаление истории введённых команд для исключения утечки чувствительных данных
-Write-Host "[4/5] Очистка истории PowerShell..." -ForegroundColor Cyan
+# 4. Clear PowerShell History
+Write-Host "[4/5] Clearing PowerShell History..." -ForegroundColor Cyan
 $historyPath = (Get-PSReadLineOption).HistorySavePath
 if (Test-Path $historyPath) {
     Clear-Content $historyPath
 }
 
-# 5. Запуск Sysprep
-# /generalize - Удаление уникальных данных (SID, GUID, имя компьютера)
-# /oobe       - Перевод в режим "первого включения" (экран приветствия при загрузке клона)
-# /shutdown   - Выключение ВМ по завершении процесса (обязательно для создания шаблона)
-# /mode:vm    - Оптимизация для виртуальных машин (пропускает проверку оборудования, экономит время)
-
+# 5. Run Sysprep
 $sysprepPath = "$env:windir\System32\Sysprep\sysprep.exe"
 
 if (Test-Path $sysprepPath) {
-    Write-Host "[5/5] Запуск Sysprep..." -ForegroundColor Magenta
-    Write-Host "ВНИМАНИЕ: Система будет выключена автоматически. После этого создавайте шаблон." -ForegroundColor Yellow
+    Write-Host "[5/5] Starting Sysprep..." -ForegroundColor Magenta
+    Write-Host "WARNING: System will shutdown automatically." -ForegroundColor Yellow
     
-    # Запуск процесса подготовки
+    # /generalize - Reset SID
+    # /oobe - First run experience
+    # /shutdown - Shutdown VM
+    # /mode:vm - VM optimization
     Start-Process -FilePath $sysprepPath -ArgumentList "/generalize /oobe /shutdown /mode:vm" -Wait
 } else {
-    Write-Error "Критическая ошибка: Утилита Sysprep не найдена по пути $sysprepPath"
+    Write-Error "CRITICAL: Sysprep not found at $sysprepPath"
 }
